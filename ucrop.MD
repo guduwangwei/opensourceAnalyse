@@ -115,7 +115,7 @@
 
      但是我们还是把作者的图拿过来啦 对着代码简单分析一下
 
-     ![](http://static.oschina.net/uploads/space/2016/0620/033203_eIby_2360415.png)
+     ![](https://github.com/guduwangwei/opensourceAnalyse/blob/master/pic/roatecom.png)
 
      ​
 
