@@ -1,10 +1,95 @@
+
+
 #### ucrop
 
 *  在分析整个Library的思路之前的我们先看看项目用的的工具类
 
    * `BitmapLoaderTask` 从网路或者content中读取图片 转化成bitmap
 
-     ~~~
+     ~~~java
+     // 这里是AsyncTask 我们拷贝他的doInBackground看一看
+
+     @Override
+         @NonNull
+         protected BitmapWorkerResult doInBackground(Void... params) {
+             if (mInputUri == null) {
+                 return new BitmapWorkerResult(new NullPointerException("Input Uri cannot be null"));
+             }
+
+             try {
+               // mInputUri 的schme
+               // 如果是https| https 从网络下载
+               // 如果是content  获取mImputUri
+               // 总结一下这个功能就是解析出 用户选择的图片的路径
+                 processInputUri();
+             } catch (NullPointerException | IOException e) {
+                 return new BitmapWorkerResult(e);
+             }
+
+             final ParcelFileDescriptor parcelFileDescriptor;
+             try {
+                parcelFileDescriptor=mContext.getContentResolver().openFileDescriptor(mInputUri, "r");
+             } catch (FileNotFoundException e) {
+                 return new BitmapWorkerResult(e);
+             }
+
+             final FileDescriptor fileDescriptor;
+             if (parcelFileDescriptor != null) {
+                 fileDescriptor = parcelFileDescriptor.getFileDescriptor();
+             } else {
+                 return new BitmapWorkerResult(new NullPointerException("ParcelFileDescriptor was null for given Uri: [" + mInputUri + "]"));
+             }
+
+             final BitmapFactory.Options options = new BitmapFactory.Options();
+             options.inJustDecodeBounds = true;
+             BitmapFactory.decodeFileDescriptor(fileDescriptor, null, options);
+             if (options.outWidth == -1 || options.outHeight == -1) {
+                 return new BitmapWorkerResult(new IllegalArgumentException("Bounds for bitmap could not be retrieved from the Uri: [" + mInputUri + "]"));
+             }
+
+             options.inSampleSize = BitmapLoadUtils.calculateInSampleSize(options, mRequiredWidth, mRequiredHeight);
+             options.inJustDecodeBounds = false;
+
+             Bitmap decodeSampledBitmap = null;
+
+             boolean decodeAttemptSuccess = false;
+             while (!decodeAttemptSuccess) {
+                 try {
+                     decodeSampledBitmap = BitmapFactory.decodeFileDescriptor(fileDescriptor, null, options);
+                     decodeAttemptSuccess = true;
+                 } catch (OutOfMemoryError error) {
+                    
+                     options.inSampleSize *= 2;
+                 }
+             }
+
+             if (decodeSampledBitmap == null) {
+                 return new BitmapWorkerResult(new IllegalArgumentException("Bitmap could not be decoded from the Uri: [" + mInputUri + "]"));
+             }
+
+             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                 BitmapLoadUtils.close(parcelFileDescriptor);
+             }
+
+             int exifOrientation = BitmapLoadUtils.getExifOrientation(mContext, mInputUri);
+             int exifDegrees = BitmapLoadUtils.exifToDegrees(exifOrientation);
+             int exifTranslation = BitmapLoadUtils.exifToTranslation(exifOrientation);
+
+             ExifInfo exifInfo = new ExifInfo(exifOrientation, exifDegrees, exifTranslation);
+
+             Matrix matrix = new Matrix();
+             if (exifDegrees != 0) {
+                 matrix.preRotate(exifDegrees);
+             }
+             if (exifTranslation != 1) {
+                 matrix.postScale(exifTranslation, 1);
+             }
+             if (!matrix.isIdentity()) {
+                 return new BitmapWorkerResult(BitmapLoadUtils.transformBitmap(decodeSampledBitmap, matrix), exifInfo);
+             }
+
+             return new BitmapWorkerResult(decodeSampledBitmap, exifInfo);
+         }
 
      ~~~
 
@@ -19,8 +104,6 @@
      ​	
 
    * `RotationGestureDetector ` 旋转手势检测
-
-   * ​
 
      ~~~java
      // 这里看一下他的 onTouchEvent方法
@@ -96,7 +179,8 @@
          private float calculateAngleDelta(float angleFrom, float angleTo) {
              //
              mAngle = angleTo % 360.0f - angleFrom % 360.0f;
-
+              // 这里只是做了一个简单的转化 
+              // 
              if (mAngle < -180.0f) {
                  mAngle += 360.0f;
              } else if (mAngle > 180.0f) {
@@ -105,37 +189,31 @@
 
              return mAngle;
          }
-
-
      ~~~
 
      上面的代码是计算距离上一次move手指旋转的距离 可以看看作者这里写的文章（我也是看这里才回的）
 
-     [计算旋转角度](https://my.oschina.net/u/2360415/blog/694272)
+      [计算旋转角度原文在这里](https://my.oschina.net/u/2360415/blog/694272)
 
      但是我们还是把作者的图拿过来啦 对着代码简单分析一下
 
      ![](https://github.com/guduwangwei/opensourceAnalyse/blob/master/pic/roatecom.png)
 
-     ​
-
      > <e = <b   <f = <e+<d  即 <e = <f-<d = <c-<d  
      >
-     > tan c = 
+     >   tan c= k/L1               tan f = M /L 
+     >
+     >   c = arctan k/L1        d= arctan M/L 
+     >
+     > 那个根据 上面罗列的公式 我们就可以 <b  = arctan K/L1 - arctan M/L  
 
-     ​
+      注 ："< "  代表  "角"  
 
-     ​
+     我们再来看作者的代码	`calculateAngleDelta（angleFrom angleTo）` 这里传入 的两个参数就是对应我们的 ` arctan K/L1   arctan M/L  ` 
 
-     ​
+     得到 旋转的角度后  `OnRotationGestureListener`  回调给注册他的类
 
-     ​
-
-     ​
-
-     ​
-
-     ​
+     ----
 
      getAction() 和getActionMasked（)的区别
 
@@ -164,9 +242,7 @@
 
 ​              我们看到 `ACTION_MASK = 0xff `二进制就是 1111 1111  那么 当 `nativeGetAction(mNativePtr) `的值在 0~255 之间的时候  我们可以片段 两个方法得到的值是相等的 ，那个当 `nativeGetAction(mNativePtr)` 的大于255 的时候 两个值就不想等了 什么时候`nativeGetAction(mNativePtr)`的值大于 255呢？答案就是 多点触控的时候
 
-
-
-
+----
 
 ~~~java
 class TransformImageView extends ImageView 
@@ -205,15 +281,14 @@ class TransformImageView extends ImageView
         if (options.outWidth == -1 || options.outHeight == -1) {
             return new BitmapWorkerResult(new IllegalArgumentException("Bounds for bitmap could not be retrieved from the Uri: [" + mInputUri + "]"));
         }
-
+        // 计算需要缩放比例
         options.inSampleSize = BitmapLoadUtils.calculateInSampleSize(options, mRequiredWidth, mRequiredHeight);
         options.inJustDecodeBounds = false;
-
         Bitmap decodeSampledBitmap = null;
-
         boolean decodeAttemptSuccess = false;
         while (!decodeAttemptSuccess) {
             try {
+                 // google 上说这样的加载bitmap 更加节省内存   
                 decodeSampledBitmap = BitmapFactory.decodeFileDescriptor(fileDescriptor, null, options);
                 decodeAttemptSuccess = true;
             } catch (OutOfMemoryError error) {
@@ -250,3 +325,137 @@ class TransformImageView extends ImageView
 
 
 
+*  `TransFormImageView extends ImageView `(这里有两个算法,只找到这个，具体的推导过程找不到了 我的数学一个不好)[点这里](https://judepereira.com/blog/calculate-the-real-scale-factor-and-the-angle-of-rotation-from-an-android-matrix/)
+
+~~~java
+  // 这个类 提供了基本的变化， scale rotate 
+   // 算出当前图片的缩放比例 
+  //  mscale_x x方向的比例 skew_y y方向的错切系数
+      public float getMatrixScale(@NonNull Matrix matrix) {
+          return (float) Math.sqrt(Math.pow(getMatrixValue(matrix, Matrix.MSCALE_X), 2)
+                  + Math.pow(getMatrixValue(matrix, Matrix.MSKEW_Y), 2));
+      }
+     /**
+       * This method calculates rotation angle for given Matrix object.
+       */
+  // ??? 并不知道为什么要这么算
+      public float getMatrixAngle(@NonNull Matrix matrix) {
+          return (float) -(Math.atan2(getMatrixValue(matrix, Matrix.MSKEW_X),
+                  getMatrixValue(matrix, Matrix.MSCALE_X)) * (180 / Math.PI));
+      }
+~~~
+
+* `cropImgeView extends TransFormImageView `
+
+  ~~~
+
+  ~~~
+
+  ​
+
+  ~~~java
+   /**
+       * This method calculates image minimum and maximum scale values for current {@link #mCropRect}.
+       */
+      private void calculateImageScaleBounds(float drawableWidth, float drawableHeight) {
+          float widthScale = Math.min(mCropRect.width() / drawableWidth, mCropRect.width() / drawableHeight);
+          float heightScale = Math.min(mCropRect.height() / drawableHeight, mCropRect.height() / drawableWidth);
+          mMinScale = Math.min(widthScale, heightScale);
+          mMaxScale = mMinScale * mMaxScaleMultiplier;
+
+      }
+
+   // 注释写的很明白 计算image的 max scale value 和 min scale value 那个到底是怎么算的呢， 如果没有看到作者的代码你会怎么算呢
+  // 这里因为图片是可以旋转的 所以计算的是四个值，去其中最小的
+
+  ~~~
+
+  * `setImageToWrapCropBounds`
+
+    ~~~java
+       protected boolean isImageWrapCropBounds(float[] imageCorners) {
+            mTempMatrix.reset(); // 重置为单位矩阵
+            //// TODO: 2016/12/13 不知道这里为什么要rotate
+            mTempMatrix.setRotate(-getCurrentAngle());
+            // image 的顶点的集合
+            float[] unrotatedImageCorners = Arrays.copyOf(imageCorners, imageCorners.length);
+            // 计算 image 基于当前matrix 变化后的，顶点的坐标集合
+            mTempMatrix.mapPoints(unrotatedImageCorners);
+            // 裁剪框的四个顶点的坐标集合
+            float[] unrotatedCropBoundsCorners = RectUtils.getCornersFromRect(mCropRect);
+            //同理 计算裁剪框 基于当前matrix 变化后的 顶点坐标的集合
+            mTempMatrix.mapPoints(unrotatedCropBoundsCorners);
+
+            return RectUtils.trapToRect(unrotatedImageCorners).contains(RectUtils.trapToRect(unrotatedCropBoundsCorners));
+        }
+    ~~~
+
+    * [单位矩阵](http://baike.baidu.com/link?url=NZS4B6_14nymCcGidVXn7TfE9-NqYiXkRmFNbFwd4jvInnE9qGvWMFlrCopQr_YMAcZM3N5cGdRr0pYMsRa6CQHTBfK2w9OK6RIkwR43S5Cq2raQ9Jnp9KYwIwkNp0NO)
+
+    ~~~java
+
+        /**
+         * 如果图片没有填满 裁剪框 这个方法会填满裁剪框 如果已经是填满的就 什么都不做
+         * If image doesn't fill the crop bounds it must be translated and scaled properly to fill those.
+         * <p/>
+         * Therefore this method calculates delta X, Y and scale values and passes them to the
+         * {@link WrapCropBoundsRunnable} which animates image.
+         * Scale value must be calculated only if image won't fill the crop bounds after it's translated to the
+         * crop bounds rectangle center. Using temporary variables this method checks this case.
+         */
+        public void setImageToWrapCropBounds(boolean animate) {
+            // todo 这里 mbitmapLaidOut = false 为什么不能进行
+            if (mBitmapLaidOut && !isImageWrapCropBounds()) {
+
+                float currentX = mCurrentImageCenter[0];
+                float currentY = mCurrentImageCenter[1];
+                float currentScale = getCurrentScale();
+
+                float deltaX = mCropRect.centerX() - currentX;
+                float deltaY = mCropRect.centerY() - currentY;
+                float deltaScale = 0;
+
+                mTempMatrix.reset();
+                mTempMatrix.setTranslate(deltaX, deltaY);
+
+                final float[] tempCurrentImageCorners = Arrays.copyOf(mCurrentImageCorners, mCurrentImageCorners.length);
+                mTempMatrix.mapPoints(tempCurrentImageCorners);
+
+                boolean willImageWrapCropBoundsAfterTranslate = isImageWrapCropBounds(tempCurrentImageCorners);
+
+                if (willImageWrapCropBoundsAfterTranslate) {
+                    final float[] imageIndents = calculateImageIndents();
+                    deltaX = -(imageIndents[0] + imageIndents[2]);
+                    deltaY = -(imageIndents[1] + imageIndents[3]);
+                } else {
+                    RectF tempCropRect = new RectF(mCropRect);
+                    mTempMatrix.reset();
+                    mTempMatrix.setRotate(getCurrentAngle());
+                    mTempMatrix.mapRect(tempCropRect);
+
+                    final float[] currentImageSides = RectUtils.getRectSidesFromCorners(mCurrentImageCorners);
+
+                    deltaScale = Math.max(tempCropRect.width() / currentImageSides[0],
+                            tempCropRect.height() / currentImageSides[1]);
+                    deltaScale = deltaScale * currentScale - currentScale;
+                }
+
+                if (animate) {
+                    post(mWrapCropBoundsRunnable = new WrapCropBoundsRunnable(
+                            CropImageView.this, mImageToWrapCropBoundsAnimDuration, currentX, currentY, deltaX, deltaY,
+                            currentScale, deltaScale, willImageWrapCropBoundsAfterTranslate));
+                } else {
+                    postTranslate(deltaX, deltaY);
+                    if (!willImageWrapCropBoundsAfterTranslate) {
+                        zoomInImage(currentScale + deltaScale, mCropRect.centerX(), mCropRect.centerY());
+                    }
+                }
+            }
+        }
+    ~~~
+
+    ​
+
+* `UcropView extends CropImageView `
+
+* ​
