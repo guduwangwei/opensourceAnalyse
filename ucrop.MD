@@ -242,6 +242,14 @@
 
 ​              我们看到 `ACTION_MASK = 0xff `二进制就是 1111 1111  那么 当 `nativeGetAction(mNativePtr) `的值在 0~255 之间的时候  我们可以片段 两个方法得到的值是相等的 ，那个当 `nativeGetAction(mNativePtr)` 的大于255 的时候 两个值就不想等了 什么时候`nativeGetAction(mNativePtr)`的值大于 255呢？答案就是 多点触控的时候
 
+*  思路 
+
+  ​
+
+
+
+
+
 ----
 
 ~~~java
@@ -345,37 +353,38 @@ class TransformImageView extends ImageView
       }
 ~~~
 
-* `cropImgeView extends TransFormImageView `
+*    `cropImgeView extends TransFormImageView `
 
-  ~~~
+     ~~~
 
-  ~~~
+     ~~~
 
-  ​
+```java
+  /**
+* This method calculates image minimum and maximum scale values for current {@link #mCropRect}.
+*/
+ private void calculateImageScaleBounds(float drawableWidth, float drawableHeight) {
+      float widthScale = Math.min(mCropRect.width() / drawableWidth, mCropRect.width() / drawableHeight);
+      float heightScale = Math.min(mCropRect.height() / drawableHeight, mCropRect.height() / drawableWidth);
+      mMinScale = Math.min(widthScale, heightScale);
+      mMaxScale = mMinScale * mMaxScaleMultiplier;
 
-  ~~~java
-   /**
-       * This method calculates image minimum and maximum scale values for current {@link #mCropRect}.
-       */
-      private void calculateImageScaleBounds(float drawableWidth, float drawableHeight) {
-          float widthScale = Math.min(mCropRect.width() / drawableWidth, mCropRect.width() / drawableHeight);
-          float heightScale = Math.min(mCropRect.height() / drawableHeight, mCropRect.height() / drawableWidth);
-          mMinScale = Math.min(widthScale, heightScale);
-          mMaxScale = mMinScale * mMaxScaleMultiplier;
-
-      }
+  }
+```
 
    // 注释写的很明白 计算image的 max scale value 和 min scale value 那个到底是怎么算的呢， 如果没有看到作者的代码你会怎么算呢
   // 这里因为图片是可以旋转的 所以计算的是四个值，去其中最小的
 
-  ~~~
+* `setImageToWrapCropBounds`
 
-  * `setImageToWrapCropBounds`
-
-    ~~~java
+~~~java
        protected boolean isImageWrapCropBounds(float[] imageCorners) {
             mTempMatrix.reset(); // 重置为单位矩阵
-            //// TODO: 2016/12/13 不知道这里为什么要rotate
+            /**
+             这里为什么什么设置的是 -getCurrentAngele
+              我发现 如果 改成 getCurrentAngle 似乎也没有什么影响 
+              不明白 ？？？？？？
+            */
             mTempMatrix.setRotate(-getCurrentAngle());
             // image 的顶点的集合
             float[] unrotatedImageCorners = Arrays.copyOf(imageCorners, imageCorners.length);
@@ -388,74 +397,149 @@ class TransformImageView extends ImageView
 
             return RectUtils.trapToRect(unrotatedImageCorners).contains(RectUtils.trapToRect(unrotatedCropBoundsCorners));
         }
-    ~~~
+~~~
 
-    * [单位矩阵](http://baike.baidu.com/link?url=NZS4B6_14nymCcGidVXn7TfE9-NqYiXkRmFNbFwd4jvInnE9qGvWMFlrCopQr_YMAcZM3N5cGdRr0pYMsRa6CQHTBfK2w9OK6RIkwR43S5Cq2raQ9Jnp9KYwIwkNp0NO)
+* [单位矩阵](http://baike.baidu.com/link?url=NZS4B6_14nymCcGidVXn7TfE9-NqYiXkRmFNbFwd4jvInnE9qGvWMFlrCopQr_YMAcZM3N5cGdRr0pYMsRa6CQHTBfK2w9OK6RIkwR43S5Cq2raQ9Jnp9KYwIwkNp0NO)
 
-    ~~~java
+~~~java
+  private float[] calculateImageIndents() {
+        mTempMatrix.reset();
+        mTempMatrix.setRotate(-getCurrentAngle());
 
-        /**
-         * 如果图片没有填满 裁剪框 这个方法会填满裁剪框 如果已经是填满的就 什么都不做
-         * If image doesn't fill the crop bounds it must be translated and scaled properly to fill those.
-         * <p/>
-         * Therefore this method calculates delta X, Y and scale values and passes them to the
-         * {@link WrapCropBoundsRunnable} which animates image.
-         * Scale value must be calculated only if image won't fill the crop bounds after it's translated to the
-         * crop bounds rectangle center. Using temporary variables this method checks this case.
-         */
-        public void setImageToWrapCropBounds(boolean animate) {
-            // todo 这里 mbitmapLaidOut = false 为什么不能进行
-            if (mBitmapLaidOut && !isImageWrapCropBounds()) {
+        float[] unrotatedImageCorners = Arrays.copyOf(mCurrentImageCorners, mCurrentImageCorners.length);
+    // 注释清楚明白 获得图片的四个顶点的左边 
+    /**
+     * 0------->1
+     * ^        |
+     * |        |
+     * |        v
+     * 3<-------2
+    */
+        float[] unrotatedCropBoundsCorners = RectUtils.getCornersFromRect(mCropRect);
+       // 计算旋转 -getCurrentAngle的角度后对应的坐标
+        mTempMatrix.mapPoints(unrotatedImageCorners);
+        mTempMatrix.mapPoints(unrotatedCropBoundsCorners);
 
-                float currentX = mCurrentImageCenter[0];
-                float currentY = mCurrentImageCenter[1];
-                float currentScale = getCurrentScale();
+        RectF unrotatedImageRect = RectUtils.trapToRect(unrotatedImageCorners);
+        RectF unrotatedCropRect = RectUtils.trapToRect(unrotatedCropBoundsCorners);
 
-                float deltaX = mCropRect.centerX() - currentX;
-                float deltaY = mCropRect.centerY() - currentY;
-                float deltaScale = 0;
+        float deltaLeft = unrotatedImageRect.left - unrotatedCropRect.left;
+        float deltaTop = unrotatedImageRect.top - unrotatedCropRect.top;
+        float deltaRight = unrotatedImageRect.right - unrotatedCropRect.right;
+        float deltaBottom = unrotatedImageRect.bottom - unrotatedCropRect.bottom;
 
+        float indents[] = new float[4];
+        indents[0] = (deltaLeft > 0) ? deltaLeft : 0;
+        indents[1] = (deltaTop > 0) ? deltaTop : 0;
+        indents[2] = (deltaRight < 0) ? deltaRight : 0;
+        indents[3] = (deltaBottom < 0) ? deltaBottom : 0;
+
+        mTempMatrix.reset();
+        mTempMatrix.setRotate(getCurrentAngle());
+        mTempMatrix.mapPoints(indents);
+
+        return indents;
+    }
+~~~
+
+~~~java
+
+    /**
+     * 点集 转换成RectF
+     * Takes an array of 2D coordinates representing corners and returns the
+     * smallest rectangle containing those coordinates.
+     *
+     * @param array array of 2D coordinates
+     * @return smallest rectangle containing coordinates
+     */
+    public static RectF trapToRect(float[] array) {
+        // Float.POSITIVE_INFINITY 无穷大    Float.NEGATIVE_INFINITY 负无穷
+        RectF r = new RectF(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY,
+                Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY);
+        for (int i = 1; i < array.length; i += 2) {
+            float x = Math.round(array[i - 1] * 10) / 10.f;
+            float y = Math.round(array[i] * 10) / 10.f;
+            r.left = (x < r.left) ? x : r.left;
+            r.top = (y < r.top) ? y : r.top;
+            r.right = (x > r.right) ? x : r.right;
+            r.bottom = (y > r.bottom) ? y : r.bottom;
+        }
+        r.sort();
+        return r;
+    }
+~~~
+
+
+
+
+```java
+    /**
+     * 如果图片没有填满 裁剪框 这个方法会填满裁剪框 如果已经是填满的就 什么都不做
+     * If image doesn't fill the crop bounds it must be translated and scaled properly to fill those.
+     * <p/>
+     * Therefore this method calculates delta X, Y and scale values and passes them to the
+     * {@link WrapCropBoundsRunnable} which animates image.
+     * Scale value must be calculated only if image won't fill the crop bounds after it's translated to the
+     * crop bounds rectangle center. Using temporary variables this method checks this case.
+     */
+    public void setImageToWrapCropBounds(boolean animate) {
+        // todo 这里 mbitmapLaidOut = false 为什么不能进行
+        if (mBitmapLaidOut && !isImageWrapCropBounds()) {
+
+            float currentX = mCurrentImageCenter[0];
+            float currentY = mCurrentImageCenter[1];
+            float currentScale = getCurrentScale();
+
+            float deltaX = mCropRect.centerX() - currentX;
+            float deltaY = mCropRect.centerY() - currentY;
+            float deltaScale = 0;
+
+            mTempMatrix.reset();
+            mTempMatrix.setTranslate(deltaX, deltaY);
+
+            final float[] tempCurrentImageCorners = Arrays.copyOf(mCurrentImageCorners, mCurrentImageCorners.length);
+            mTempMatrix.mapPoints(tempCurrentImageCorners);
+
+            boolean willImageWrapCropBoundsAfterTranslate = isImageWrapCropBounds(tempCurrentImageCorners);
+
+            if (willImageWrapCropBoundsAfterTranslate) {
+                final float[] imageIndents = calculateImageIndents();
+                deltaX = -(imageIndents[0] + imageIndents[2]);
+                deltaY = -(imageIndents[1] + imageIndents[3]);
+            } else {
+                RectF tempCropRect = new RectF(mCropRect);
                 mTempMatrix.reset();
-                mTempMatrix.setTranslate(deltaX, deltaY);
+                mTempMatrix.setRotate(getCurrentAngle());
+                mTempMatrix.mapRect(tempCropRect);
 
-                final float[] tempCurrentImageCorners = Arrays.copyOf(mCurrentImageCorners, mCurrentImageCorners.length);
-                mTempMatrix.mapPoints(tempCurrentImageCorners);
+                final float[] currentImageSides = RectUtils.getRectSidesFromCorners(mCurrentImageCorners);
 
-                boolean willImageWrapCropBoundsAfterTranslate = isImageWrapCropBounds(tempCurrentImageCorners);
+                deltaScale = Math.max(tempCropRect.width() / currentImageSides[0],
+                        tempCropRect.height() / currentImageSides[1]);
+                deltaScale = deltaScale * currentScale - currentScale;
+            }
 
-                if (willImageWrapCropBoundsAfterTranslate) {
-                    final float[] imageIndents = calculateImageIndents();
-                    deltaX = -(imageIndents[0] + imageIndents[2]);
-                    deltaY = -(imageIndents[1] + imageIndents[3]);
-                } else {
-                    RectF tempCropRect = new RectF(mCropRect);
-                    mTempMatrix.reset();
-                    mTempMatrix.setRotate(getCurrentAngle());
-                    mTempMatrix.mapRect(tempCropRect);
-
-                    final float[] currentImageSides = RectUtils.getRectSidesFromCorners(mCurrentImageCorners);
-
-                    deltaScale = Math.max(tempCropRect.width() / currentImageSides[0],
-                            tempCropRect.height() / currentImageSides[1]);
-                    deltaScale = deltaScale * currentScale - currentScale;
-                }
-
-                if (animate) {
-                    post(mWrapCropBoundsRunnable = new WrapCropBoundsRunnable(
-                            CropImageView.this, mImageToWrapCropBoundsAnimDuration, currentX, currentY, deltaX, deltaY,
-                            currentScale, deltaScale, willImageWrapCropBoundsAfterTranslate));
-                } else {
-                    postTranslate(deltaX, deltaY);
-                    if (!willImageWrapCropBoundsAfterTranslate) {
-                        zoomInImage(currentScale + deltaScale, mCropRect.centerX(), mCropRect.centerY());
-                    }
+            if (animate) {
+                post(mWrapCropBoundsRunnable = new WrapCropBoundsRunnable(
+                        CropImageView.this, mImageToWrapCropBoundsAnimDuration, currentX, currentY, deltaX, deltaY,
+                        currentScale, deltaScale, willImageWrapCropBoundsAfterTranslate));
+            } else {
+                postTranslate(deltaX, deltaY);
+                if (!willImageWrapCropBoundsAfterTranslate) {
+                    zoomInImage(currentScale + deltaScale, mCropRect.centerX(), mCropRect.centerY());
                 }
             }
         }
-    ~~~
+    }
 
-    ​
+```
 
 * `UcropView extends CropImageView `
 
 * ​
+
+* `OverLayVIew`  裁剪框
+
+   
+
+  ​
