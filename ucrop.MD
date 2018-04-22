@@ -2,6 +2,12 @@
 
 #### ucrop
 
+![uml](http://upload-images.jianshu.io/upload_images/1485091-2dc8413a8b747851.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+
+
+
+
 *  在分析整个Library的思路之前的我们先看看项目用的的工具类
 
    * `BitmapLoaderTask` 从网路或者content中读取图片 转化成bitmap
@@ -90,7 +96,6 @@
 
              return new BitmapWorkerResult(decodeSampledBitmap, exifInfo);
          }
-
      ~~~
 
      ​
@@ -531,7 +536,6 @@ class TransformImageView extends ImageView
             }
         }
     }
-
 ```
 
 * `UcropView extends CropImageView `
@@ -540,6 +544,8 @@ class TransformImageView extends ImageView
 
 * `OverLayVIew`  裁剪框
 
-   
+   ![这里是裁剪框的图](https://github.com/guduwangwei/opensourceAnalyse/blob/master/pic/grid.png)
+
 
   ​
+
